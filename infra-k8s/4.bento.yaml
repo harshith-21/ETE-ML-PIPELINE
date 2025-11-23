@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: bento-svc
+  namespace: harshith
+spec:
+  selector:
+    app: bento-svc
+  ports:
+    - port: 3000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bento-svc
+  namespace: harshith
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bento-svc
+  template:
+    metadata:
+      labels:
+        app: bento-svc
+    spec:
+      containers:
+        - name: bento
+          image: my-bento-service:latest
+          ports:
+            - containerPort: 3000
+          env:
+            - name: MLFLOW_TRACKING_URI
+              value: http://mlflow.harshith.svc.cluster.local:5000
+            - name: MODEL_NAME
+              value: "my-model"
+            - name: MODEL_STAGE
+              value: "Production"

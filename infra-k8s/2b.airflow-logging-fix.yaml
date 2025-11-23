@@ -1,0 +1,23 @@
+# =============================================================================
+# Airflow Logging Configuration Fix
+# This ConfigMap provides airflow.cfg overrides to disable worker log fetching
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: airflow-config
+  namespace: harshith
+data:
+  # Override airflow.cfg to disable worker log server fetching
+  airflow.cfg: |
+    [logging]
+    remote_logging = True
+    remote_log_conn_id = aws_default
+    remote_base_log_folder = s3://criteo-logs
+    encrypt_s3_logs = False
+    
+    [core]
+    executor = LocalExecutor
+    # Don't try to fetch logs from worker pods
+    enable_xcom_pickling = True
+

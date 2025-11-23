@@ -1,0 +1,317 @@
+# ============================================================
+# SERVICES
+# ============================================================
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: airflow-web
+  namespace: harshith
+spec:
+  selector:
+    app: airflow-web
+  ports:
+    - port: 8080
+      targetPort: 8080
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: airflow-scheduler
+  namespace: harshith
+spec:
+  clusterIP: None  # Headless service - makes pod hostnames DNS-resolvable
+  selector:
+    app: airflow-scheduler
+  ports:
+    - name: logs
+      port: 8793
+      targetPort: 8793
+
+
+
+# ============================================================
+# AIRFLOW WEB DEPLOYMENT
+# ============================================================
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airflow-web
+  namespace: harshith
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: airflow-web
+  template:
+    metadata:
+      labels:
+        app: airflow-web
+    spec:
+      initContainers:
+        # DB INIT
+        - name: airflow-db-init
+          image: harshith21/ete-ml-pipeline-airflow:latest
+          env:
+            - name: AIRFLOW__DATABASE__SQL_ALCHEMY_CONN
+              value: postgresql+psycopg2://airflow:airflow@postgres-airflow:5432/airflow
+          command: ["bash", "-c", "airflow db init"]
+
+
+        # ADMIN USER
+        - name: airflow-create-admin
+          image: harshith21/ete-ml-pipeline-airflow:latest
+          env:
+            - name: AIRFLOW__DATABASE__SQL_ALCHEMY_CONN
+              value: postgresql+psycopg2://airflow:airflow@postgres-airflow:5432/airflow
+          command:
+            - bash
+            - -c
+            - |
+              airflow users create \
+                --username admin \
+                --password admin \
+                --firstname admin \
+                --lastname admin \
+                --role Admin \
+                --email admin@example.com || true
+
+        # MINIO BUCKET SETUP
+        - name: create-buckets
+          image: minio/mc:latest
+          command: ["sh", "-c"]
+          args:
+            - |
+              mc alias set local http://minio.harshith.svc.cluster.local:9000 minio minio123;
+              mc mb --ignore-existing local/criteo-bucket;
+              mc mb --ignore-existing local/criteo-logs;
+              mc mb --ignore-existing local/mlflow-artifacts;
+
+      containers:
+        - name: airflow-webserver
+          image: harshith21/ete-ml-pipeline-airflow:latest
+          args: ["webserver"]
+          ports:
+            - containerPort: 8080
+          env:
+            # Core config
+            - name: AIRFLOW__CORE__EXECUTOR
+              value: LocalExecutor
+
+            - name: AIRFLOW__LOGGING__LOGGING_CONFIG_CLASS
+              value: "airflow.config_templates.airflow_local_settings.DEFAULT_LOGGING_CONFIG"
+            
+            # Disable worker log server completely (use remote logs only)
+            - name: AIRFLOW__LOGGING__ENABLE_TASK_CONTEXT_LOGGER
+              value: "false"
+            - name: AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK
+              value: "true"
+            # Force Airflow to ONLY use remote logs, never try worker log server
+            - name: AIRFLOW__CORE__HOSTNAME_CALLABLE
+              value: "airflow.utils.net:get_host_ip_address"
+            - name: AIRFLOW__CORE__ENABLE_XCOM_PICKLING
+              value: "true"
+
+            # DB
+            - name: AIRFLOW__DATABASE__SQL_ALCHEMY_CONN
+              value: postgresql+psycopg2://airflow:airflow@postgres-airflow:5432/airflow
+            
+            # Secret key - MUST be same across all components
+            - name: AIRFLOW__WEBSERVER__SECRET_KEY
+              value: "ete-ml-pipeline-secret-key-2025"
+
+            # S3 access
+            - name: AWS_ACCESS_KEY_ID
+              value: minio
+            - name: AWS_SECRET_ACCESS_KEY
+              value: minio123
+            - name: AWS_ENDPOINT_URL
+              value: http://minio.harshith.svc.cluster.local:9000
+            - name: AWS_REGION
+              value: us-east-1
+            - name: S3_BUCKET
+              value: criteo-bucket
+            
+            # MLflow S3 configuration (for artifact storage from Airflow tasks)
+            - name: MLFLOW_S3_ENDPOINT_URL
+              value: http://minio.harshith.svc.cluster.local:9000
+
+            - name: AIRFLOW__LOGGING__REMOTE_LOGGING
+              value: "true"
+
+            - name: AIRFLOW__LOGGING__REMOTE_LOG_CONN_ID
+              value: "aws_default"
+
+            - name: AIRFLOW__LOGGING__REMOTE_BASE_LOG_FOLDER
+              value: "s3://criteo-logs"
+            
+            - name: AIRFLOW__LOGGING__ENCRYPT_S3_LOGS
+              value: "false"
+
+            - name: CRITEO_URL
+              value: "https://huggingface.co/datasets/criteo/CriteoClickLogs/resolve/main/day_0.gz"
+
+          volumeMounts:
+            - name: airflow-dags
+              mountPath: /opt/airflow/dags/criteo_chunk_producer.py
+              subPath: criteo_chunk_producer.py
+
+            - name: airflow-dags
+              mountPath: /opt/airflow/dags/criteo_cumulative_builder.py
+              subPath: criteo_cumulative_builder.py
+            
+            - name: airflow-dags
+              mountPath: /opt/airflow/dags/criteo_training_pipeline.py
+              subPath: criteo_training_pipeline.py
+
+            - name: airflow-dags
+              mountPath: /opt/airflow/dags/debug_criteo_raw_inspector.py
+              subPath: debug_criteo_raw_inspector.py
+
+
+      volumes:
+        - name: airflow-dags
+          configMap:
+            name: airflow-dags
+
+
+
+# ============================================================
+# AIRFLOW SCHEDULER DEPLOYMENT
+# ============================================================
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airflow-scheduler
+  namespace: harshith
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: airflow-scheduler
+  template:
+    metadata:
+      labels:
+        app: airflow-scheduler
+    spec:
+      subdomain: airflow-scheduler  # Required for headless service DNS
+      initContainers:
+        # DB INIT
+        - name: airflow-db-init
+          image: harshith21/ete-ml-pipeline-airflow:latest
+          env:
+            - name: AIRFLOW__DATABASE__SQL_ALCHEMY_CONN
+              value: postgresql+psycopg2://airflow:airflow@postgres-airflow:5432/airflow
+          command: ["bash", "-c", "airflow db init"]
+
+        # ADMIN
+        - name: airflow-create-admin
+          image: harshith21/ete-ml-pipeline-airflow:latest
+          env:
+            - name: AIRFLOW__DATABASE__SQL_ALCHEMY_CONN
+              value: postgresql+psycopg2://airflow:airflow@postgres-airflow:5432/airflow
+          command:
+            - bash
+            - -c
+            - |
+              airflow users create \
+                --username admin \
+                --password admin \
+                --firstname admin \
+                --lastname admin \
+                --role Admin \
+                --email admin@example.com || true
+
+        # BUCKETS
+        - name: create-buckets
+          image: minio/mc:latest
+          command: ["sh", "-c"]
+          args:
+            - |
+              mc alias set local http://minio.harshith.svc.cluster.local:9000 minio minio123;
+              mc mb --ignore-existing local/criteo-bucket;
+              mc mb --ignore-existing local/criteo-logs;
+              mc mb --ignore-existing local/mlflow-artifacts;
+
+      containers:
+        - name: airflow-scheduler
+          image: harshith21/ete-ml-pipeline-airflow:latest
+          args: ["scheduler"]
+          env:
+            - name: AIRFLOW__CORE__EXECUTOR
+              value: LocalExecutor
+
+            - name: AIRFLOW__LOGGING__LOGGING_CONFIG_CLASS
+              value: "airflow.config_templates.airflow_local_settings.DEFAULT_LOGGING_CONFIG"
+            
+            # Disable worker log server completely (use remote logs only)
+            - name: AIRFLOW__LOGGING__ENABLE_TASK_CONTEXT_LOGGER
+              value: "false"
+            - name: AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK
+              value: "true"
+            # Force Airflow to ONLY use remote logs, never try worker log server
+            - name: AIRFLOW__CORE__HOSTNAME_CALLABLE
+              value: "airflow.utils.net:get_host_ip_address"
+            - name: AIRFLOW__CORE__ENABLE_XCOM_PICKLING
+              value: "true"
+
+            # DB
+            - name: AIRFLOW__DATABASE__SQL_ALCHEMY_CONN
+              value: postgresql+psycopg2://airflow:airflow@postgres-airflow:5432/airflow
+            
+            # Secret key - MUST be same across all components
+            - name: AIRFLOW__WEBSERVER__SECRET_KEY
+              value: "ete-ml-pipeline-secret-key-2025"
+
+            # S3 access credentials (REQUIRED for log upload!)
+            - name: AWS_ACCESS_KEY_ID
+              value: minio
+            - name: AWS_SECRET_ACCESS_KEY
+              value: minio123
+            - name: AWS_ENDPOINT_URL
+              value: http://minio.harshith.svc.cluster.local:9000
+            - name: AWS_REGION
+              value: us-east-1
+            
+            # MLflow S3 configuration (for artifact storage from Airflow tasks)
+            - name: MLFLOW_S3_ENDPOINT_URL
+              value: http://minio.harshith.svc.cluster.local:9000
+
+            # S3 auth
+            - name: AIRFLOW__LOGGING__REMOTE_LOGGING
+              value: "true"
+
+            - name: AIRFLOW__LOGGING__REMOTE_LOG_CONN_ID
+              value: "aws_default"
+
+            - name: AIRFLOW__LOGGING__REMOTE_BASE_LOG_FOLDER
+              value: "s3://criteo-logs"
+            
+            - name: AIRFLOW__LOGGING__ENCRYPT_S3_LOGS
+              value: "false"
+
+
+          volumeMounts:
+            - name: airflow-dags
+              mountPath: /opt/airflow/dags/criteo_chunk_producer.py
+              subPath: criteo_chunk_producer.py
+
+            - name: airflow-dags
+              mountPath: /opt/airflow/dags/criteo_cumulative_builder.py
+              subPath: criteo_cumulative_builder.py
+
+            - name: airflow-dags
+              mountPath: /opt/airflow/dags/criteo_training_pipeline.py
+              subPath: criteo_training_pipeline.py
+
+            - name: airflow-dags
+              mountPath: /opt/airflow/dags/debug_criteo_raw_inspector.py
+              subPath: debug_criteo_raw_inspector.py
+
+      volumes:
+        - name: airflow-dags
+          configMap:
+            name: airflow-dags

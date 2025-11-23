@@ -1,0 +1,6 @@
+## not needed if you already have a namespace
+
+# apiVersion: v1
+# kind: Namespace
+# metadata:
+#   name: harshith 
