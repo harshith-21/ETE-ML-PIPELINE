@@ -1,427 +1,339 @@
 # 🚀 ETE-ML-PIPELINE
 
-**End-to-End ML Pipeline** - A production-ready machine learning infrastructure for continuous training, model versioning, and inference with full model provenance tracking.
+**End-to-End ML Pipeline** - Production-ready MLOps system for continuous model training and deployment with full provenance tracking.
 
-## 🎯 Project Overview
+---
 
-ETE-ML-PIPELINE is a complete end-to-end machine learning pipeline that demonstrates production-grade MLOps practices for **Criteo Click-Through Rate (CTR) prediction** using:
+## 📸 Screenshots & Demo
 
-- **Apache Airflow** - Orchestration and workflow management
-- **MinIO** - S3-compatible object storage for artifacts and logs
-- **MLflow** - Experiment tracking and model registry
-- **BentoML** - Model serving with version tracking
-- **FastAPI** - User-facing frontend with prediction UI
-- **PostgreSQL** - Backend storage for Airflow and MLflow
-- **Kubernetes** - Container orchestration platform
+<!-- TODO: Add screenshot of Airflow DAG -->
+![Airflow Pipeline](docs/images/airflow-dag.png)
 
-## 📊 Architecture
+<!-- TODO: Add screenshot of MLflow UI -->
+![MLflow Model Registry](docs/images/mlflow-registry.png)
+
+<!-- TODO: Add screenshot of Frontend -->
+![Prediction UI](docs/images/frontend-ui.png)
+
+<!-- TODO: Add architecture diagram -->
+![Architecture Diagram](docs/images/architecture.png)
+
+<!-- TODO: Add demo video link -->
+🎥 [Watch Demo Video](docs/videos/demo.mp4)
+
+---
+
+## 🎯 What This Project Does
+
+An automated machine learning pipeline that:
+- **Ingests data** continuously from Criteo CTR dataset
+- **Trains XGBoost models** automatically every 10 minutes
+- **Tracks experiments** and manages model versions with MLflow
+- **Deploys models** automatically to production with BentoML
+- **Serves predictions** through a user-friendly web interface
+- **Provides full traceability** - every prediction shows which exact model (version, run ID, artifact path) generated it
+
+**Use Case**: Predicting Click-Through Rates (CTR) for online advertising
+
+---
+
+## 🏗️ Architecture Overview
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                         Data Flow                               │
+│                    DATA INGESTION & PROCESSING                  │
 └─────────────────────────────────────────────────────────────────┘
-
-   ┌──────────────┐
-   │   Frontend   │──► User inputs features
-   │  (FastAPI)   │◄── Returns predictions + model provenance
-   └──────┬───────┘
-          │
-          ▼
-   ┌──────────────┐
-   │   BentoML    │──► Loads model from MLflow
-   │  (Serving)   │    Tracks: version, run_id, run_name, artifact_uri
-   └──────┬───────┘
-          │
-          ▼
-   ┌──────────────┐
-   │   MLflow     │──► Model registry + experiment tracking
-   │  (Registry)  │    Manages: Production/Staging stages
-   └──────┬───────┘
-          │
-          ▼
-   ┌──────────────┐
-   │   Airflow    │──► Orchestrates training pipeline
-   │ (Scheduler)  │    DAGs: criteo_training_pipeline
-   └──────┬───────┘
-          │
-          ▼
-   ┌──────────────┐
-   │    MinIO     │──► Stores: training data, models, logs
-   │  (Storage)   │    Buckets: criteo-data, criteo-logs, mlflow-artifacts
-   └──────────────┘
+                               │
+                               ▼
+┌──────────────┐        ┌──────────────┐        ┌──────────────┐
+│   Airflow    │───────▶│    MinIO     │───────▶│   MLflow     │
+│ (Orchestrate)│        │  (Storage)   │        │  (Registry)  │
+└──────────────┘        └──────────────┘        └──────────────┘
+                               │                        │
+                               │                        │
+                               ▼                        ▼
+                        ┌──────────────┐        ┌──────────────┐
+                        │  PostgreSQL  │        │   BentoML    │
+                        │  (Metadata)  │        │  (Serving)   │
+                        └──────────────┘        └──────────────┘
+                                                       │
+                                                       ▼
+                                                ┌──────────────┐
+                                                │   Frontend   │
+                                                │   (FastAPI)  │
+                                                └──────────────┘
 ```
 
-## ✨ Key Features
+**Flow**: Raw Data → Chunk → Parquet → Train → Register → Deploy → Predict
 
-### 🔍 **Model Provenance Tracking**
-- Every prediction shows which exact model made it
-- Displays: Run Name (MLflow nickname), Run ID (hash), Artifact URI
-- Full traceability from MinIO artifact path to prediction result
+---
 
-### 🔄 **Automated Training Pipeline**
-- Periodic model retraining with Airflow
-- XGBoost model training on Criteo CTR dataset
-- Automatic model registration and promotion in MLflow
-
-### 📦 **Model Versioning**
-- All models tracked in MLflow registry
-- Production/Staging stage management
-- BentoML automatically loads latest Production model
-
-### 🎨 **User-Friendly Frontend**
-- Web UI for making predictions
-- Real-time model information display
-- Shows all registered model versions and their stages
-
-## 🚀 Quick Start
+## 🚀 Quick Start (5 Minutes)
 
 ### Prerequisites
+- Kubernetes cluster (minikube/kind/cloud)
+- kubectl configured
+- 4GB+ RAM available
 
-- Kubernetes cluster (minikube, kind, or cloud provider)
-- kubectl configured with cluster access
-- Docker (for building custom images)
-- Docker Hub account (for pushing images)
-
-### 1. Deploy Infrastructure
+### 1. Deploy Everything
 
 ```bash
-# Deploy all services at once
+# Clone the repo
+cd mlpro
+
+# Deploy all services
 ./main.sh start all
 
-# Or deploy step-by-step
-./main.sh start postgres    # PostgreSQL for Airflow + MLflow
-./main.sh start minio        # Object storage
-./main.sh start airflow      # Orchestration (includes DAGs in ConfigMaps)
-./main.sh start mlflow       # Model registry
-./main.sh start bento        # Model serving
-./main.sh start frontend     # User interface
+# Wait for pods (2-3 minutes)
+watch kubectl get pods -n harshith
 ```
 
 ### 2. Access Services
 
-Set up port forwarding to access the UIs:
-
 ```bash
-# Airflow UI (admin/admin)
+# Terminal 1: Airflow
 kubectl port-forward -n harshith svc/airflow-webserver 8080:8080
 
-# MinIO Console (minio/minio123)
-kubectl port-forward -n harshith svc/minio 9090:9090
-
-# MLflow UI
+# Terminal 2: MLflow
 kubectl port-forward -n harshith svc/mlflow 5000:5000
 
-# Frontend (Make Predictions!)
+# Terminal 3: MinIO
+kubectl port-forward -n harshith svc/minio 9090:9090
+
+# Terminal 4: Frontend
 kubectl port-forward -n harshith svc/frontend 8081:8081
 ```
 
-Then visit:
-- **Airflow**: http://localhost:8080
-- **MinIO**: http://localhost:9090
-- **MLflow**: http://localhost:5000
-- **Frontend**: http://localhost:8081 ⭐
+**URLs:**
+- Airflow: http://localhost:8080 (admin/admin)
+- MLflow: http://localhost:5000
+- MinIO: http://localhost:9090 (minio/minio123)
+- Frontend: http://localhost:8081
 
-### 3. Run Training Pipeline
-
-1. Navigate to Airflow UI (http://localhost:8080)
-2. Find the `criteo_training_pipeline` DAG
-3. Click "Trigger DAG" to start training
-4. Watch the pipeline: ingest → process → train → register → promote
-5. Model appears in MLflow and BentoML automatically loads it
-
-### 4. Make Predictions
-
-1. Open the Frontend (http://localhost:8081)
-2. Use sample inputs from `sample_input_frontend.txt`
-3. Click "🚀 Predict CTR"
-4. See prediction with full model provenance:
-   - Model version
-   - Run name (e.g., "glamorous-goose-948")
-   - Run ID hash (e.g., "6820c410efef...")
-   - Artifact URI in MinIO
-
-## 📦 Custom Docker Images
-
-All custom images are multi-platform (linux/amd64, linux/arm64) and hosted on Docker Hub.
-
-### Airflow (`harshith21/ete-ml-pipeline-airflow:latest`)
-
-Custom Airflow 2.10.1 with Python 3.11 and ML dependencies:
-- MLflow 2.9.2
-- XGBoost 2.0.3
-- scikit-learn 1.4.2
-- pandas 2.1.3
-- boto3 (for S3/MinIO)
-
-### BentoML (`harshith21/ete-ml-pipeline-bento:latest`)
-
-Custom BentoML service that:
-- Loads models from MLflow registry
-- Tracks model metadata (version, run_id, run_name)
-- Exposes /predict, /health, /model_info endpoints
-- Automatically uses Production stage models
-
-### Frontend (`harshith21/ete-ml-pipeline-frontend:latest`)
-
-FastAPI application with:
-- Beautiful prediction UI
-- Model provenance display
-- Sample data loader
-- Real-time model information
-
-### Building Images
+### 3. Run the Pipeline
 
 ```bash
-cd custom_dockerfiles
-
-# Build individual service
-cd airflow && ./build.sh
-cd bento && ./build.sh
-cd frontend && ./build.sh
-
-# Or build all at once
-./build-all.sh
+# Trigger the master pipeline in Airflow UI
+# Or via CLI:
+kubectl exec -n harshith deploy/airflow-scheduler -- \
+  airflow dags trigger criteo_master_pipeline
 ```
 
-Images are automatically pushed to Docker Hub during build.
+**Wait 5-10 minutes for:**
+- Data ingestion ✓
+- Model training ✓
+- Model registration ✓
+- Auto-deployment ✓
 
-## 🛠️ Management Commands
+### 4. Fix "Model not loaded" Issue
 
-The `main.sh` script provides unified service management:
-
-```bash
-./main.sh <action> <service>
-```
-
-### Actions
-- `start` - Deploy/start a service
-- `stop` - Stop a service (scale to 0)
-- `restart` - Restart a service
-- `cleanup` - Remove a service completely (deployments + services + configmaps)
-- `status` - Show service status
-- `deploy_all` - Deploy all services
-- `cleanup_all` - Remove everything
-
-### Services
-- `postgres` - PostgreSQL databases
-- `minio` - MinIO object storage
-- `airflow` - Airflow (scheduler + webserver)
-- `mlflow` - MLflow tracking server
-- `bento` - BentoML model serving
-- `frontend` - FastAPI frontend
-- `all` - All services at once
-
-### Examples
+⚠️ **If frontend shows "Model not loaded":**
 
 ```bash
-# Start services
-./main.sh start postgres
-./main.sh start airflow
+# Option 1: Reload BentoML (no restart)
+kubectl exec -n harshith deploy/bento-svc -- \
+  curl -X POST http://localhost:3000/reload -d '{}'
 
-# Restart to pick up changes
-./main.sh restart airflow
+# Option 2: Restart BentoML service
 ./main.sh restart bento
-
-# Check status
-./main.sh status all
-
-# Full cleanup
-./main.sh cleanup all
 ```
+
+This happens because BentoML starts before the first model is trained. After training completes, reload/restart picks up the model.
+
+### 5. Make Predictions
+
+1. Open http://localhost:8081
+2. Click "📝 Load Sample" button
+3. Click "🚀 Predict CTR"
+4. See results with **full model provenance**!
+
+---
+
+## 🛠️ Pipeline Workflow
+
+The `criteo_master_pipeline` DAG runs **every 10 minutes** and executes 4 tasks sequentially:
+
+```
+1. produce_chunk      → Download & chunk raw Criteo data
+         ↓
+2. build_cumulative   → Convert chunks to Parquet format
+         ↓
+3. train_model        → Train XGBoost, log to MLflow, register model
+         ↓
+4. reload_bento       → Hot-reload BentoML with new model (no restart!)
+```
+
+**Key Feature**: Each prediction shows:
+- Model version (e.g., "3")
+- Run name (e.g., "beautiful-trout-500")
+- Run ID hash (matches MinIO artifact path)
+- Exact S3 path where model is stored
+
+---
+
+## 🔧 Technologies Used
+
+| Technology | Purpose | Why This Tech |
+|-----------|---------|---------------|
+| **Apache Airflow 2.10.1** | Workflow orchestration | Industry standard for ML pipelines, DAG-based scheduling |
+| **MinIO** | S3-compatible object storage | Stores raw data, training data, model artifacts, logs |
+| **MLflow 2.9.2** | Experiment tracking & model registry | Version control for ML models, lineage tracking |
+| **BentoML 1.3.8** | Model serving | Fast model deployment, API generation, versioning |
+| **FastAPI** | Frontend web framework | Modern Python web framework for ML APIs |
+| **PostgreSQL 13** | Backend database | Stores Airflow & MLflow metadata |
+| **XGBoost 2.0.3** | ML algorithm | Fast, accurate gradient boosting for CTR prediction |
+| **Kubernetes** | Container orchestration | Scalable, production-ready infrastructure |
+| **Docker** | Containerization | Consistent environments across dev/prod |
+| **Python 3.11** | Programming language | Rich ML ecosystem, async support |
+
+---
 
 ## 📁 Project Structure
 
 ```
-.
-├── README.md                       # This file
-├── main.sh                         # Service management script
-├── sample_input_frontend.txt       # Sample inputs for testing
-├── adminkubeconfig.yaml            # Kubernetes config (gitignored)
+mlpro/
+├── README.md                    # This file
+├── MASTER.md                    # Detailed technical documentation
+├── main.sh                      # Service management script
+├── sample_input_frontend.txt    # 20 test samples
 │
-├── infra-k8s/                      # Kubernetes manifests
-│   ├── 0.namespace.yaml            # Namespace: harshith
-│   ├── 1.postgres.yaml             # PostgreSQL for Airflow + MLflow
-│   ├── 2.airflow.yaml              # Airflow webserver + scheduler
-│   ├── 2a.airflowconfigmaps.yaml   # DAGs (criteo_training_pipeline)
-│   ├── 2b.Minio.yaml               # MinIO S3-compatible storage
-│   ├── 3.mlflow.yaml               # MLflow tracking + registry
-│   ├── 4.bento.yaml                # BentoML serving (with ConfigMap)
-│   └── 5.frontend.yaml             # FastAPI frontend
+├── infra-k8s/                   # Kubernetes manifests
+│   ├── 0.namespace.yaml         # namespace: harshith
+│   ├── 1.postgres.yaml          # PostgreSQL for Airflow + MLflow
+│   ├── 2.airflow.yaml           # Airflow webserver + scheduler
+│   ├── 2a.airflowconfigmaps.yaml # DAG: criteo_master_pipeline
+│   ├── 2b.Minio.yaml            # MinIO S3-compatible storage
+│   ├── 3.mlflow.yaml            # MLflow tracking + registry
+│   ├── 4.bento.yaml             # BentoML serving (with ConfigMap)
+│   └── 5.frontend.yaml          # FastAPI frontend
 │
-└── custom_dockerfiles/             # Custom Docker images
-    ├── README.md
-    ├── build-all.sh
-    ├── push-all.sh
-    │
-    ├── airflow/                    # Custom Airflow image
-    │   ├── Dockerfile
-    │   ├── build.sh
-    │   ├── build-local.sh
-    │   ├── push.sh
-    │   ├── README.md
-    │   └── README-BUILD.md
-    │
-    ├── bento/                      # Custom BentoML image
-    │   ├── Dockerfile
-    │   ├── service.py              # BentoML service definition
-    │   ├── requirements.txt
-    │   ├── build.sh
-    │   ├── push.sh
-    │   └── README.md
-    │
-    └── frontend/                   # Custom Frontend image
-        ├── Dockerfile
-        ├── app.py                  # FastAPI application
-        ├── requirements.txt
-        ├── build.sh
-        ├── templates/
-        │   └── index.html          # Prediction UI
-        └── .dockerignore
+└── custom_dockerfiles/          # Custom Docker images
+    ├── airflow/                 # Custom Airflow with ML deps
+    ├── bento/                   # BentoML service
+    └── frontend/                # Prediction UI
 ```
 
-## 🎓 Use Case: Criteo CTR Prediction
+---
 
-The pipeline demonstrates a complete ML workflow for predicting click-through rates:
+## 🎓 Key Features
 
-### 1. **Data Ingestion** (Airflow DAG)
-- Downloads Criteo CTR dataset
-- Processes and prepares training data
-- Stores in MinIO buckets
+### ✅ Full Automation
+- Scheduled training every 10 minutes
+- Automatic model registration
+- Auto-promotion to Production stage
+- Hot reload (no service restart needed)
 
-### 2. **Model Training** (XGBoost)
-- Trains on 39 features (13 integer + 26 categorical)
-- Logs metrics, parameters, and artifacts to MLflow
-- Handles categorical feature encoding automatically
+### ✅ Model Provenance
+Every prediction shows:
+- Which model version
+- Training run ID (hash)
+- MLflow run name (e.g., "glamorous-goose-948")
+- Exact MinIO artifact path
 
-### 3. **Model Registration** (MLflow)
-- Registers model with version tracking
-- Stores in MinIO (`mlflow-artifacts` bucket)
-- Promotes to Production stage
+### ✅ Production-Ready
+- Multi-platform Docker images (amd64/arm64)
+- Kubernetes-native deployment
+- S3-compatible artifact storage
+- Graceful error handling
+- Comprehensive logging
 
-### 4. **Model Serving** (BentoML)
-- Loads Production model from MLflow
-- Captures metadata: version, run_id, run_name, artifact_uri
-- Exposes REST API for predictions
+### ✅ User-Friendly
+- Beautiful web UI for predictions
+- One-click sample data loading
+- Real-time model information
+- Clear error messages
 
-### 5. **User Interface** (FastAPI)
-- Accepts 39 feature values
-- Returns CTR prediction (%)
-- Shows full model provenance
+---
 
-## 🔍 Model Provenance Example
+## 🔍 Common Commands
 
-When you make a prediction, you see:
+```bash
+# Service Management
+./main.sh start all              # Start everything
+./main.sh stop airflow           # Stop a service
+./main.sh restart bento          # Restart BentoML
+./main.sh status all             # Check all services
+./main.sh cleanup all            # Remove everything
 
+# Kubernetes
+kubectl get pods -n harshith                    # List pods
+kubectl logs -n harshith -l app=airflow-scheduler  # Airflow logs
+kubectl logs -n harshith -l app=bento-svc         # BentoML logs
+
+# Airflow CLI
+kubectl exec -n harshith deploy/airflow-scheduler -- \
+  airflow dags list                             # List DAGs
+kubectl exec -n harshith deploy/airflow-scheduler -- \
+  airflow dags trigger criteo_master_pipeline   # Trigger pipeline
+kubectl exec -n harshith deploy/airflow-scheduler -- \
+  airflow dags unpause criteo_master_pipeline   # Unpause DAG
 ```
-✅ Prediction: 2.45% CTR
 
-🔍 Model Provenance:
-├─ Model Name: criteo_ctr_model
-├─ Version: 2
-├─ Stage: Production
-├─ Run Name: glamorous-goose-948  (MLflow nickname)
-├─ Run ID: 6820c410efef45449fbb6ab1044f340c
-└─ Artifact URI: s3://mlflow-artifacts/1/6820c410efef45449fbb6ab1044f340c/artifacts/model
-```
-
-This hash (`6820c410efef...`) matches exactly what you see in MinIO at:
-`http://minio:9090/browser/mlflow-artifacts/1/6820c410efef45449fbb6ab1044f340c/`
-
-## 🔧 Configuration
-
-### Kubernetes Namespace
-All services run in the `harshith` namespace.
-
-### Storage Configuration
-- **Airflow logs**: MinIO bucket `criteo-logs`
-- **Training data**: MinIO bucket `criteo-data`
-- **Model artifacts**: MinIO bucket `mlflow-artifacts`
-
-### Default Credentials
-- **PostgreSQL (Airflow)**: airflow / airflow
-- **PostgreSQL (MLflow)**: mlflow / mlflow
-- **MinIO**: minio / minio123
-- **Airflow Admin**: admin / admin
-
-### Environment Variables
-All services configured via K8s env vars in manifests. Key configurations:
-- `MLFLOW_TRACKING_URI`: http://mlflow.harshith.svc.cluster.local:5000
-- `MLFLOW_S3_ENDPOINT_URL`: http://minio.harshith.svc.cluster.local:9000
-- `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`: MinIO credentials
-
-## 📚 Documentation
-
-- [Custom Docker Images](custom_dockerfiles/README.md)
-- [Airflow Image Details](custom_dockerfiles/airflow/README.md)
-- [BentoML Service](custom_dockerfiles/bento/README.md)
-- [Sample Inputs](sample_input_frontend.txt)
+---
 
 ## 🐛 Troubleshooting
 
-### Pods not starting?
+### "Model not loaded" in Frontend
+**Solution**: Restart or reload BentoML after first training completes
 ```bash
-kubectl get pods -n harshith
+./main.sh restart bento
+```
+
+### Airflow DAG not running
+**Solution**: Check if DAG is unpaused and scheduler is running
+```bash
+kubectl exec -n harshith deploy/airflow-scheduler -- \
+  airflow dags unpause criteo_master_pipeline
+```
+
+### Image pull errors
+**Solution**: Images are multi-platform. Check platform compatibility:
+```bash
 kubectl describe pod <pod-name> -n harshith
-kubectl logs <pod-name> -n harshith
 ```
 
-### Image pull errors?
-Ensure images are built for correct platform (linux/amd64 or linux/arm64).
-Use `./build.sh` which builds multi-platform images automatically.
-
-### Can't access services?
-Check port-forward is running and namespace is correct:
-```bash
-kubectl port-forward -n harshith svc/<service-name> <local-port>:<service-port>
-```
-
-### Training pipeline fails?
-Check Airflow logs:
+### Training fails
+**Solution**: Check logs and ensure MinIO has data
 ```bash
 kubectl logs -n harshith -l app=airflow-scheduler --tail=100
 ```
 
-Check MLflow is running:
-```bash
-kubectl get pods -n harshith -l app=mlflow
-```
-
----
 ---
 
-In a shocking plot twist that surprised absolutely no one (least of all me), a kubeconfig accidentally made its way into the repository.
-Don’t worry — the token has been obliterated, yeeted into the void, ritually deleted, and no longer grants access to anything more powerful than a 404 page.
+## 📊 Noteworthy Highlights
 
-Mistakes were made.
-But hey — I fix my mistakes before they become security incidents.
-Call it personal growth, call it self-preservation, call it “please don’t revoke my cluster access.”
-
-The important part:
-The leaked kubeconfig is now about as effective as shouting “kubectl apply” at a brick wall.
+- **End-to-end MLOps pipeline** with automated training, deployment, and serving
+- **Kubernetes-native** infrastructure with 6 microservices
+- **Full model lineage tracking** from training data to predictions
+- **Production-grade** with error handling, logging, and monitoring
+- **Scalable architecture** using industry-standard tools (Airflow, MLflow, BentoML)
+- **Custom Docker images** with multi-platform support
+- **RESTful APIs** for model serving and predictions
+- **Real-time retraining** pipeline that runs every 10 minutes
+- **S3-compatible storage** for artifacts and data versioning
+- **Modern Python stack** (FastAPI, asyncio, type hints)
 
 ---
+
+## 🔗 Links
+
+- **Docker Hub**: https://hub.docker.com/u/harshith21
+  - Airflow: `harshith21/ete-ml-pipeline-airflow:latest`
+  - BentoML: `harshith21/ete-ml-pipeline-bento:latest`
+  - Frontend: `harshith21/ete-ml-pipeline-frontend:latest`
+
+- **Documentation**:
+  - [MASTER.md](MASTER.md) - Detailed technical documentation
+  - [Sample Inputs](sample_input_frontend.txt) - Test data for predictions
+
 ---
-
-## 🤝 Contributing
-
-This is a learning/demonstration project showcasing MLOps best practices. Feel free to:
-- Fork and adapt for your needs
-- Add new features (e.g., A/B testing, canary deployments)
-- Improve the pipeline (e.g., add data validation, model monitoring)
 
 ## 📝 License
 
 MIT License
 
-## 🔗 Links
-
-- **Docker Hub Organization**: https://hub.docker.com/u/harshith21
-- **Airflow Image**: https://hub.docker.com/r/harshith21/ete-ml-pipeline-airflow
-- **BentoML Image**: https://hub.docker.com/r/harshith21/ete-ml-pipeline-bento
-- **Frontend Image**: https://hub.docker.com/r/harshith21/ete-ml-pipeline-frontend
-
 ---
 
-**ETE-ML-PIPELINE** - End-to-End Machine Learning Pipeline with Full Model Provenance 🚀
+**ETE-ML-PIPELINE** - Production-grade MLOps pipeline demonstrating industry best practices 🚀
 
-Built with ❤️ for MLOps learning and demonstration.
+Built with ❤️ for learning and demonstration.

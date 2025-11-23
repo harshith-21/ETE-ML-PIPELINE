@@ -8,7 +8,7 @@
 set -e
 
 # Configuration
-export KUBECONFIG=adminkubeconfig.yaml
+# export KUBECONFIG=adminkubeconfig.yaml
 NAMESPACE="harshith"
 
 # =============================================================================
