@@ -23,9 +23,6 @@ data:
 
     log = logging.getLogger(__name__)
 
-    # ===============================
-    # CONFIG
-    # ===============================
     S3_ENDPOINT = os.getenv("AWS_ENDPOINT_URL", "http://minio.harshith.svc.cluster.local:9000")
     ACCESS_KEY = os.getenv("AWS_ACCESS_KEY_ID", "minio")
     SECRET_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "minio123")
@@ -33,16 +30,12 @@ data:
 
     RAW_KEY = "raw/train.txt.gz"
     LOCAL_RAW = "/tmp/train.txt.gz"
-
     CHUNK_LINES = 1_000_000
 
     STATE_TOTAL = "state/total_lines.txt"
     STATE_NEXT = "state/next_line.txt"
     CHUNK_PREFIX = "chunks/"
 
-    # ===============================
-    # S3 Helpers
-    # ===============================
     def make_s3():
         return boto3.client(
             "s3",
@@ -71,11 +64,7 @@ data:
     def write_state(s3, key, val):
         s3.put_object(Bucket=BUCKET, Key=key, Body=str(val).encode())
 
-    # ===============================
-    # zcat line streamer
-    # ===============================
     def stream_lines_with_zcat(path):
-        """Stream lines from gzip using zcat safely (Criteo-compatible)."""
         p = subprocess.Popen(
             ["zcat", path],
             stdout=subprocess.PIPE,
@@ -87,18 +76,13 @@ data:
         for line in p.stdout:
             yield line
 
-    # ===============================
-    # Ensure MinIO
-    # ===============================
     def ensure_minio():
         s3 = make_s3()
         wait_minio(s3)
-
         try:
             s3.head_bucket(Bucket=BUCKET)
         except:
             s3.create_bucket(Bucket=BUCKET)
-
         for p in ["raw/", "chunks/", "state/"]:
             marker = p + ".keep"
             try:
@@ -106,16 +90,10 @@ data:
             except:
                 s3.put_object(Bucket=BUCKET, Key=marker, Body=b"")
 
-    # ===============================
-    # Download raw if missing
-    # ===============================
     def download_raw():
         import requests
-
         s3 = make_s3()
         wait_minio(s3)
-
-        # If exists, skip
         try:
             m = s3.head_object(Bucket=BUCKET, Key=RAW_KEY)
             if m.get("ContentLength", 0) > 10_000_000:
@@ -123,67 +101,47 @@ data:
                 return
         except:
             pass
-
         url = "https://huggingface.co/datasets/criteo/CriteoClickLogs/resolve/main/day_0.gz"
         log.info(f"Downloading raw file from {url}")
-
         with requests.get(url, stream=True) as r:
             r.raise_for_status()
             with open(LOCAL_RAW, "wb") as f:
                 for chunk in r.iter_content(5 * 1024 * 1024):
                     if chunk:
                         f.write(chunk)
-
         log.info("Upload raw file to S3...")
         s3.upload_file(LOCAL_RAW, BUCKET, RAW_KEY)
 
-    # ===============================
-    # Count total lines using zcat
-    # ===============================
     def count_total_lines():
         s3 = make_s3()
         wait_minio(s3)
-
         existing = read_state(s3, STATE_TOTAL)
         if existing is not None:
             log.info(f"Total lines already known: {existing}")
             return
-
         log.info("Downloading file for counting...")
         s3.download_file(BUCKET, RAW_KEY, LOCAL_RAW)
-
         cnt = 0
         for cnt, _ in enumerate(stream_lines_with_zcat(LOCAL_RAW), start=1):
             if cnt % 1_000_000 == 0:
                 log.info(f"Counted {cnt:,} lines...")
-
         write_state(s3, STATE_TOTAL, cnt)
         log.info(f"Stored total lines = {cnt}")
 
-    # ===============================
-    # Produce next 1M-line chunk
-    # ===============================
     def produce_chunk():
         s3 = make_s3()
         wait_minio(s3)
-
         total = read_state(s3, STATE_TOTAL)
         if total is None:
             raise Exception("Total lines unknown.")
-
         next_line = read_state(s3, STATE_NEXT, default=0)
-
         if next_line >= total:
             log.info("All lines chunked.")
             return
-
         start = next_line
         end = min(total, start + CHUNK_LINES)
         log.info(f"Producing chunk {start:,} → {end:,}")
-
-        # Download locally
         s3.download_file(BUCKET, RAW_KEY, LOCAL_RAW)
-
         collected = []
         for i, line in enumerate(stream_lines_with_zcat(LOCAL_RAW)):
             if i < start:
@@ -191,24 +149,16 @@ data:
             if i >= end:
                 break
             collected.append(line)
-
         chunk_idx = len([
             o for o in s3.list_objects_v2(Bucket=BUCKET, Prefix=CHUNK_PREFIX).get("Contents", [])
             if not o["Key"].endswith(".keep")
         ])
-
         key = f"{CHUNK_PREFIX}chunk_{chunk_idx:06d}.txt"
-
         s3.put_object(Bucket=BUCKET, Key=key, Body="".join(collected).encode())
         log.info(f"Uploaded chunk {key} [{len(collected):,} lines]")
-
         write_state(s3, STATE_NEXT, end)
 
-    # ===============================
-    # DAG
-    # ===============================
     default_args = {"owner": "airflow"}
-
     with DAG(
         "criteo_chunk_producer",
         start_date=days_ago(1),
@@ -216,14 +166,11 @@ data:
         catchup=False,
         default_args=default_args,
     ) as dag:
-
         t1 = PythonOperator(task_id="ensure_minio", python_callable=ensure_minio)
         t2 = PythonOperator(task_id="download_raw", python_callable=download_raw)
         t3 = PythonOperator(task_id="count_total_lines", python_callable=count_total_lines)
         t4 = PythonOperator(task_id="produce_chunk", python_callable=produce_chunk)
-
         t1 >> t2 >> t3 >> t4
-
 
   criteo_cumulative_builder.py: |
     import os
@@ -231,12 +178,10 @@ data:
     import time
     import logging
     from pathlib import Path
-
     import boto3
     import pandas as pd
     import pyarrow as pa
     import pyarrow.parquet as pq
-
     from airflow import DAG
     from airflow.utils.dates import days_ago
     from airflow.operators.python import PythonOperator
@@ -247,7 +192,6 @@ data:
     ACCESS_KEY = os.getenv("AWS_ACCESS_KEY_ID", "minio")
     SECRET_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "minio123")
     BUCKET = os.getenv("S3_BUCKET", "criteo-bucket")
-
     CHUNK_PREFIX = "chunks/"
     CUM_PREFIX = "cumulative/"
     STATE_LAST_AGG = "state/last_agg_idx.txt"
@@ -283,35 +227,27 @@ data:
     def aggregate():
         c = s3()
         wait_minio(c)
-
         objs = c.list_objects_v2(Bucket=BUCKET, Prefix=CHUNK_PREFIX).get("Contents", [])
         chunks = [o for o in objs if not o["Key"].endswith(".keep")]
         chunks = sorted(chunks, key=lambda o: o["Key"])
-
         last = read_state(c, STATE_LAST_AGG, -1)
-
         for o in chunks:
             key = o["Key"]
             idx = int(Path(key).stem.split("_")[-1])
             if idx <= last:
                 continue
-
             body = c.get_object(Bucket=BUCKET, Key=key)["Body"].read()
             df = pd.read_csv(io.StringIO(body.decode()), sep="\t", header=None)
-
             table = pa.Table.from_pandas(df)
             out = pa.BufferOutputStream()
             pq.write_table(table, out)
-            pb = out.getvalue().to_pybytes()    # <-- convert arrow buffer to bytes!
-
+            pb = out.getvalue().to_pybytes()
             out_key = f"{CUM_PREFIX}cumulative_{idx:06d}.parquet"
             c.put_object(Bucket=BUCKET, Key=out_key, Body=pb)
             log.info("Created %s", out_key)
-
             write_state(c, STATE_LAST_AGG, idx)
 
     default_args = {"owner": "airflow"}
-
     with DAG(
         "criteo_cumulative_builder",
         start_date=days_ago(1),
@@ -319,26 +255,19 @@ data:
         catchup=False,
         default_args=default_args,
     ) as dag:
-
         run = PythonOperator(task_id="aggregate_chunks", python_callable=aggregate)
 
-
-
-
   criteo_master_pipeline.py: |
-    # Master pipeline that runs all three tasks sequentially
     import os
     import io
     import time
     import logging
     from pathlib import Path
-    
     import boto3
     from botocore.exceptions import ClientError
     import pandas as pd
     import pyarrow as pa
     import pyarrow.parquet as pq
-    
     from airflow import DAG
     from airflow.operators.python import PythonOperator
     from airflow.utils.dates import days_ago
@@ -346,30 +275,22 @@ data:
     import mlflow.xgboost
     import xgboost as xgb
     import requests
-    
+
     log = logging.getLogger(__name__)
-    
-    # ===============================
-    # CONFIG
-    # ===============================
+
     S3_ENDPOINT = os.getenv("AWS_ENDPOINT_URL", "http://minio.harshith.svc.cluster.local:9000")
     ACCESS_KEY = os.getenv("AWS_ACCESS_KEY_ID", "minio")
     SECRET_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "minio123")
     BUCKET = os.getenv("S3_BUCKET", "criteo-bucket")
-    
     RAW_KEY = "raw/train.txt.gz"
     LOCAL_RAW = "/tmp/train.txt.gz"
     CHUNK_LINES = 1_000_000
-    
     STATE_TOTAL = "state/total_lines.txt"
     STATE_NEXT = "state/next_line.txt"
     CHUNK_PREFIX = "chunks/"
     CUM_PREFIX = "cumulative/"
     STATE_LAST_AGG = "state/last_agg_idx.txt"
-    
-    # ===============================
-    # S3 Helpers
-    # ===============================
+
     def make_s3():
         return boto3.client(
             "s3",
@@ -378,7 +299,7 @@ data:
             aws_secret_access_key=SECRET_KEY,
             config=boto3.session.Config(signature_version="s3v4")
         )
-    
+
     def wait_minio(c):
         for _ in range(20):
             try:
@@ -387,140 +308,103 @@ data:
             except:
                 time.sleep(1)
         raise Exception("MinIO unreachable")
-    
+
     def read_state(c, key, default=-1):
         try:
             v = c.get_object(Bucket=BUCKET, Key=key)["Body"].read().decode()
             return int(v)
         except:
             return default
-    
+
     def write_state(c, key, val):
         c.put_object(Bucket=BUCKET, Key=key, Body=str(val).encode())
-    
-    # ===============================
-    # TASK 1: Produce Chunk
-    # ===============================
+
     def produce_chunk():
         s3 = make_s3()
         wait_minio(s3)
-        
-        # Read state
         total = read_state(s3, STATE_TOTAL, 0)
         next_line = read_state(s3, STATE_NEXT, 0)
-        
         if total == 0:
             log.info("No data yet, skipping")
             return
-        
         if next_line >= total:
             log.info("All chunks produced")
             return
-        
-        # Read chunk
         log.info(f"Downloading {RAW_KEY}...")
         s3.download_file(BUCKET, RAW_KEY, LOCAL_RAW)
-        
         import gzip
         collected = []
         start = next_line
         end = min(start + CHUNK_LINES, total)
-        
         with gzip.open(LOCAL_RAW, "rt", encoding="utf-8", errors="ignore") as f:
             for i, line in enumerate(f):
                 if i >= end:
                     break
                 if i >= start:
                     collected.append(line)
-        
         chunk_idx = start // CHUNK_LINES
         key = f"{CHUNK_PREFIX}chunk_{chunk_idx:06d}.txt"
-        
         s3.put_object(Bucket=BUCKET, Key=key, Body="".join(collected).encode())
         log.info(f"Uploaded chunk {key} [{len(collected):,} lines]")
-        
         write_state(s3, STATE_NEXT, end)
-    
-    # ===============================
-    # TASK 2: Build Cumulative
-    # ===============================
+
     def build_cumulative():
         s3 = make_s3()
         wait_minio(s3)
-        
         objs = s3.list_objects_v2(Bucket=BUCKET, Prefix=CHUNK_PREFIX).get("Contents", [])
         chunks = [o for o in objs if not o["Key"].endswith(".keep")]
         chunks = sorted(chunks, key=lambda o: o["Key"])
-        
         last = read_state(s3, STATE_LAST_AGG, -1)
-        
         for o in chunks:
             key = o["Key"]
             idx = int(Path(key).stem.split("_")[-1])
             if idx <= last:
                 continue
-            
             body = s3.get_object(Bucket=BUCKET, Key=key)["Body"].read()
             df = pd.read_csv(io.StringIO(body.decode()), sep="\t", header=None)
-            
             table = pa.Table.from_pandas(df)
             out = pa.BufferOutputStream()
             pq.write_table(table, out)
             pb = out.getvalue().to_pybytes()
-            
             out_key = f"{CUM_PREFIX}cumulative_{idx:06d}.parquet"
             s3.put_object(Bucket=BUCKET, Key=out_key, Body=pb)
             log.info("Created %s", out_key)
-            
             write_state(s3, STATE_LAST_AGG, idx)
-    
-    # ===============================
-    # TASK 3: Train Model
-    # ===============================
+
     def train_model():
         logger = logging.getLogger(__name__)
-        
         try:
             logger.info("=" * 80)
             logger.info("TRAINING PIPELINE STARTED")
             logger.info("=" * 80)
-            
             s3 = make_s3()
-            
             logger.info("Step 1: Loading data from MinIO...")
             objs = s3.list_objects_v2(Bucket=BUCKET, Prefix=CUM_PREFIX).get("Contents", [])
             parquet_keys = [o["Key"] for o in objs if o["Key"].endswith(".parquet")]
             parquet_keys = sorted(parquet_keys)
-            
             dfs = []
             for k in parquet_keys:
                 body = s3.get_object(Bucket=BUCKET, Key=k)["Body"].read()
                 df = pd.read_parquet(io.BytesIO(body))
                 dfs.append(df)
-            
             df = pd.concat(dfs, ignore_index=True)
             logger.info(f"✓ Data loaded: {len(df)} rows, {len(df.columns)} columns")
-            
             logger.info("Step 2: Preparing features and labels...")
             y = df.iloc[:, 0]
             X = df.iloc[:, 1:]
             logger.info(f"✓ Features: {X.shape}, Labels: {y.shape}")
-            
             logger.info("Step 3: Converting categorical columns to numeric...")
             for col in X.columns:
                 if X[col].dtype == 'object':
                     X[col] = X[col].astype('category').cat.codes
             logger.info(f"✓ All columns converted to numeric")
-            
             logger.info("Step 4: Creating DMatrix...")
             dtrain = xgb.DMatrix(X, label=y)
             logger.info(f"✓ DMatrix created")
-            
             logger.info("Step 5: Connecting to MLflow...")
             mlflow.set_tracking_uri("http://mlflow.harshith.svc.cluster.local:5000")
             mlflow.set_experiment("criteo_ctr")
             logger.info("✓ MLflow connection established")
-            
             logger.info("Step 6: Starting MLflow run...")
             with mlflow.start_run():
                 params = {
@@ -529,24 +413,20 @@ data:
                     "objective": "binary:logistic"
                 }
                 logger.info(f"✓ MLflow run started with params: {params}")
-                
                 logger.info("Step 7: Training XGBoost model...")
                 model = xgb.train(params, dtrain, num_boost_round=200)
                 logger.info("✓ Model training completed")
-                
                 logger.info("Step 8: Logging model to MLflow...")
                 mlflow.xgboost.log_model(model, artifact_path="model")
                 mlflow.log_params(params)
                 mlflow.log_metric("train_rows", len(df))
                 logger.info("✓ Model and metrics logged")
-                
                 logger.info("Step 9: Registering model...")
                 reg = mlflow.register_model(
                     "runs:/{}/model".format(mlflow.active_run().info.run_id),
                     "criteo_ctr_model"
                 )
                 logger.info(f"✓ Model registered as version {reg.version}")
-                
                 logger.info("Step 10: Promoting to Production...")
                 client = mlflow.tracking.MlflowClient()
                 client.transition_model_version_stage(
@@ -556,11 +436,9 @@ data:
                     archive_existing_versions=True
                 )
                 logger.info("✓ Model promoted to Production")
-            
             logger.info("=" * 80)
             logger.info("TRAINING PIPELINE COMPLETED SUCCESSFULLY!")
             logger.info("=" * 80)
-            
         except Exception as e:
             logger.error("=" * 80)
             logger.error("TRAINING PIPELINE FAILED!")
@@ -570,13 +448,9 @@ data:
             logger.error(f"Traceback:\n{traceback.format_exc()}")
             logger.error("=" * 80)
             raise
-    
-    # ===============================
-    # TASK 4: Reload BentoML
-    # ===============================
+
     def reload_bento():
         logger = logging.getLogger(__name__)
-        
         try:
             logger.info("Reloading BentoML service with new model...")
             response = requests.post(
@@ -584,37 +458,28 @@ data:
                 json={},
                 timeout=30
             )
-            
             if response.status_code == 200:
                 result = response.json()
                 logger.info(f"✓ BentoML reloaded successfully: {result}")
             else:
                 logger.warning(f"⚠️ BentoML reload returned status {response.status_code}")
-        
         except Exception as e:
             logger.error(f"✗ Failed to reload BentoML: {e}")
             logger.info("Model is registered in MLflow. BentoML will load it on next restart.")
-    
-    # ===============================
-    # DAG
-    # ===============================
+
     default_args = {"owner": "airflow"}
-    
     with DAG(
         "criteo_master_pipeline",
         start_date=days_ago(1),
-        schedule_interval="*/10 * * * *",  # Every 10 minutes
+        schedule_interval="*/10 * * * *",
         catchup=False,
         default_args=default_args,
     ) as dag:
-        
         t1 = PythonOperator(task_id="produce_chunk", python_callable=produce_chunk)
         t2 = PythonOperator(task_id="build_cumulative", python_callable=build_cumulative)
         t3 = PythonOperator(task_id="train_model", python_callable=train_model)
         t4 = PythonOperator(task_id="reload_bento", python_callable=reload_bento)
-        
         t1 >> t2 >> t3 >> t4
-
 
   debug_criteo_raw_inspector.py: |
     import os
@@ -640,7 +505,6 @@ data:
         )
         s3.download_file(BUCKET, RAW_KEY, LOCAL)
         print("Downloaded debug file:", LOCAL)
-
         with gzip.open(LOCAL, "rt", encoding="utf-8", errors="ignore") as f:
             for i in range(10):
                 print(f"Line {i}:", f.readline())
@@ -653,10 +517,7 @@ data:
     ) as dag:
         debug = PythonOperator(task_id="inspect_raw", python_callable=inspect)
 
-
-
   criteo_training_pipeline.py: |
-    # criteo_training_pipeline.py
     import os
     import io
     import boto3
@@ -671,8 +532,7 @@ data:
     S3_ENDPOINT = os.getenv("AWS_ENDPOINT_URL")
     ACCESS_KEY = os.getenv("AWS_ACCESS_KEY_ID")
     SECRET_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
-    BUCKET     = os.getenv("S3_BUCKET", "criteo-bucket")
-
+    BUCKET = os.getenv("S3_BUCKET", "criteo-bucket")
     CUM_PREFIX = "cumulative/"
 
     def s3():
@@ -688,49 +548,39 @@ data:
         objs = c.list_objects_v2(Bucket=BUCKET, Prefix=CUM_PREFIX).get("Contents", [])
         parquet_keys = [o["Key"] for o in objs if o["Key"].endswith(".parquet")]
         parquet_keys = sorted(parquet_keys)
-        
         dfs = []
         for k in parquet_keys:
             body = c.get_object(Bucket=BUCKET, Key=k)["Body"].read()
             df = pd.read_parquet(io.BytesIO(body))
             dfs.append(df)
-        
         return pd.concat(dfs, ignore_index=True)
 
     def train_model():
         import logging
         logger = logging.getLogger(__name__)
-        
         try:
             logger.info("=" * 80)
             logger.info("TRAINING PIPELINE STARTED")
             logger.info("=" * 80)
-            
             logger.info("Step 1: Loading data from MinIO...")
             df = load_cumulative()
             logger.info(f"✓ Data loaded: {len(df)} rows, {len(df.columns)} columns")
-            
             logger.info("Step 2: Preparing features and labels...")
-            y = df.iloc[:, 0]         # click label
-            X = df.iloc[:, 1:]        # features
+            y = df.iloc[:, 0]
+            X = df.iloc[:, 1:]
             logger.info(f"✓ Features: {X.shape}, Labels: {y.shape}")
-
             logger.info("Step 3: Converting categorical columns to numeric...")
-            # Convert object columns to category then to codes (integers)
             for col in X.columns:
                 if X[col].dtype == 'object':
                     X[col] = X[col].astype('category').cat.codes
             logger.info(f"✓ All columns converted to numeric")
-
             logger.info("Step 4: Creating DMatrix...")
             dtrain = xgb.DMatrix(X, label=y)
             logger.info(f"✓ DMatrix created")
-
             logger.info("Step 5: Connecting to MLflow...")
             mlflow.set_tracking_uri("http://mlflow.harshith.svc.cluster.local:5000")
             mlflow.set_experiment("criteo_ctr")
             logger.info("✓ MLflow connection established")
-
             logger.info("Step 6: Starting MLflow run...")
             with mlflow.start_run():
                 params = {
@@ -739,24 +589,20 @@ data:
                     "objective": "binary:logistic"
                 }
                 logger.info(f"✓ MLflow run started with params: {params}")
-                
                 logger.info("Step 7: Training XGBoost model...")
                 model = xgb.train(params, dtrain, num_boost_round=200)
                 logger.info("✓ Model training completed")
-                
                 logger.info("Step 8: Logging model to MLflow...")
                 mlflow.xgboost.log_model(model, artifact_path="model")
                 mlflow.log_params(params)
                 mlflow.log_metric("train_rows", len(df))
                 logger.info("✓ Model and metrics logged")
-
                 logger.info("Step 9: Registering model...")
                 reg = mlflow.register_model(
                     "runs:/{}/model".format(mlflow.active_run().info.run_id),
                     "criteo_ctr_model"
                 )
                 logger.info(f"✓ Model registered as version {reg.version}")
-
                 logger.info("Step 10: Promoting to Production...")
                 client = mlflow.tracking.MlflowClient()
                 client.transition_model_version_stage(
@@ -766,11 +612,9 @@ data:
                     archive_existing_versions=True
                 )
                 logger.info("✓ Model promoted to Production")
-            
             logger.info("=" * 80)
             logger.info("TRAINING PIPELINE COMPLETED SUCCESSFULLY!")
             logger.info("=" * 80)
-            
         except Exception as e:
             logger.error("=" * 80)
             logger.error("TRAINING PIPELINE FAILED!")
@@ -780,23 +624,13 @@ data:
             import traceback
             logger.error(f"Traceback:\n{traceback.format_exc()}")
             logger.error("=" * 80)
-            raise  # Re-raise so Airflow marks task as failed
-
-    # def restart_bento():
-    #     # Simply delete the deployment so K8s restarts it
-    #     # TODO: Enable this after deploying Bento
-    #     os.system("kubectl rollout restart deployment bento-svc -n harshith")
+            raise
 
     default_args = {"owner": "airflow"}
-
     with DAG(
         "criteo_training_pipeline",
         start_date=days_ago(1),
         schedule_interval=None,
         catchup=False,
     ) as dag:
-
         t1 = PythonOperator(task_id="train_model", python_callable=train_model)
-        # t2 = PythonOperator(task_id="restart_bento", python_callable=restart_bento)
-
-        # t1 >> t2

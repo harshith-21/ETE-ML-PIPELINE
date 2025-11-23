@@ -6,17 +6,13 @@
 
 ## 📸 Screenshots & Demo
 
-<!-- TODO: Add screenshot of Airflow DAG -->
-![Airflow Pipeline](docs/images/airflow-dag.png)
+![Airflow Pipeline](images/ete-airflow.png)
 
-<!-- TODO: Add screenshot of MLflow UI -->
-![MLflow Model Registry](docs/images/mlflow-registry.png)
+![MLflow Model Registry](images/ete-mlflow.png)
 
-<!-- TODO: Add screenshot of Frontend -->
-![Prediction UI](docs/images/frontend-ui.png)
+![Prediction UI](images/ete-frontend.png)
 
-<!-- TODO: Add architecture diagram -->
-![Architecture Diagram](docs/images/architecture.png)
+![Minio S3 compatible storage UI](images/ete-minio.png)
 
 <!-- TODO: Add demo video link -->
 🎥 [Watch Demo Video](docs/videos/demo.mp4)

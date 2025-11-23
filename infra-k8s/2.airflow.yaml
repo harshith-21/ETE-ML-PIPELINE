@@ -170,6 +170,9 @@ spec:
               mountPath: /opt/airflow/dags/debug_criteo_raw_inspector.py
               subPath: debug_criteo_raw_inspector.py
 
+            - name: airflow-dags
+              mountPath: /opt/airflow/dags/criteo_master_pipeline.py
+              subPath: criteo_master_pipeline.py
 
       volumes:
         - name: airflow-dags
@@ -310,6 +313,10 @@ spec:
             - name: airflow-dags
               mountPath: /opt/airflow/dags/debug_criteo_raw_inspector.py
               subPath: debug_criteo_raw_inspector.py
+
+            - name: airflow-dags
+              mountPath: /opt/airflow/dags/criteo_master_pipeline.py
+              subPath: criteo_master_pipeline.py
 
       volumes:
         - name: airflow-dags

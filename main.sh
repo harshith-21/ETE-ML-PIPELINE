@@ -64,7 +64,8 @@ get_service_files() {
             echo "infra-k8s/0.namespace.yaml"
             ;;
         all)
-            echo "infra-k8s/0.namespace.yaml infra-k8s/1.postgres.yaml infra-k8s/2b.Minio.yaml infra-k8s/2a.airflowconfigmaps.yaml infra-k8s/2.airflow.yaml infra-k8s/3.mlflow.yaml infra-k8s/4.bento.yaml infra-k8s/5.frontend.yaml"
+            # Skip namespace creation - create manually if needed: kubectl create namespace harshith
+            echo "infra-k8s/1.postgres.yaml infra-k8s/2b.Minio.yaml infra-k8s/2a.airflowconfigmaps.yaml infra-k8s/2.airflow.yaml infra-k8s/3.mlflow.yaml infra-k8s/4.bento.yaml infra-k8s/5.frontend.yaml"
             ;;
         *)
             return 1
@@ -207,8 +208,10 @@ status_service() {
 start_all() {
     print_header "Starting ALL services"
     
-    start_service "namespace"
-    sleep 2
+    # Note: Namespace should be created manually: kubectl create namespace harshith
+    print_info "Ensure namespace '$NAMESPACE' exists before continuing..."
+    sleep 1
+    
     start_service "postgres"
     sleep 3
     start_service "minio"
