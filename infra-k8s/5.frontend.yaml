@@ -26,9 +26,10 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: my-frontend:latest
+          image: harshith21/ete-ml-pipeline-frontend:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 8081
           env:
-            - name: PREDICT_URL
-              value: http://bento-svc.harshith.svc.cluster.local:3000/predict
+            - name: BENTO_URL
+              value: http://bento-svc.harshith.svc.cluster.local:3000
