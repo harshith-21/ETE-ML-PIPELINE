@@ -34,29 +34,64 @@ data:
     # Set MLflow tracking URI
     mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
 
-    # Load the production model from MLflow
+    # Load the production model from MLflow and capture metadata
+    model = None
+    model_metadata = {
+        "version": None,
+        "run_id": None,
+        "run_name": None,
+        "artifact_uri": None
+    }
+    
     try:
-        model_uri = f"models:/{MODEL_NAME}/{MODEL_STAGE}"
-        print(f"Loading model from: {model_uri}")
-        model = mlflow.xgboost.load_model(model_uri)
-        print(f"✓ Model loaded successfully!")
+        client = mlflow.tracking.MlflowClient()
+        
+        # Get model version info for the specified stage
+        versions = client.search_model_versions(f"name='{MODEL_NAME}'")
+        production_version = None
+        
+        for v in versions:
+            if v.current_stage == MODEL_STAGE:
+                production_version = v
+                break
+        
+        if not production_version and versions:
+            # Fallback to latest version
+            production_version = versions[0]
+            print(f"⚠️ No {MODEL_STAGE} version found, using latest version {production_version.version}")
+        
+        if production_version:
+            model_uri = f"models:/{MODEL_NAME}/{production_version.version}"
+            print(f"Loading model from: {model_uri}")
+            print(f"  Version: {production_version.version}")
+            print(f"  Run ID: {production_version.run_id}")
+            
+            # Load the model
+            model = mlflow.xgboost.load_model(model_uri)
+            
+            # Get run information for more metadata
+            run = client.get_run(production_version.run_id)
+            
+            # Store metadata
+            model_metadata = {
+                "version": production_version.version,
+                "run_id": production_version.run_id,
+                "run_name": run.info.run_name or run.info.run_id[:8],
+                "artifact_uri": production_version.source,
+                "stage": production_version.current_stage
+            }
+            
+            print(f"✓ Model loaded successfully!")
+            print(f"  Run Name: {model_metadata['run_name']}")
+            print(f"  Artifact URI: {model_metadata['artifact_uri']}")
+        else:
+            raise Exception(f"No versions found for model {MODEL_NAME}")
+            
     except Exception as e:
         print(f"✗ Failed to load model: {e}")
-        # Fallback: try to load the latest version
-        try:
-            client = mlflow.tracking.MlflowClient()
-            versions = client.search_model_versions(f"name='{MODEL_NAME}'")
-            if versions:
-                latest_version = versions[0].version
-                model_uri = f"models:/{MODEL_NAME}/{latest_version}"
-                print(f"Trying latest version: {model_uri}")
-                model = mlflow.xgboost.load_model(model_uri)
-                print(f"✓ Model loaded successfully (version {latest_version})!")
-            else:
-                raise Exception(f"No versions found for model {MODEL_NAME}")
-        except Exception as e2:
-            print(f"✗ Failed to load model (fallback): {e2}")
-            model = None
+        import traceback
+        traceback.print_exc()
+        model = None
 
     # Create BentoML service
     svc = bentoml.Service("criteo_ctr_service")
@@ -105,6 +140,10 @@ data:
                 "predictions": predictions.tolist(),
                 "model_name": MODEL_NAME,
                 "model_stage": MODEL_STAGE,
+                "model_version": model_metadata["version"],
+                "run_id": model_metadata["run_id"],
+                "run_name": model_metadata["run_name"],
+                "artifact_uri": model_metadata["artifact_uri"],
                 "num_samples": len(predictions)
             }
         
@@ -139,18 +178,28 @@ data:
             client = mlflow.tracking.MlflowClient()
             versions = client.search_model_versions(f"name='{MODEL_NAME}'")
             
+            # Include loaded model metadata
             model_info = {
                 "model_name": MODEL_NAME,
                 "model_stage": MODEL_STAGE,
                 "mlflow_uri": MLFLOW_TRACKING_URI,
+                "loaded_model": model_metadata,
                 "versions": []
             }
             
             for version in versions:
+                # Get run info for each version
+                try:
+                    run = client.get_run(version.run_id)
+                    run_name = run.info.run_name or version.run_id[:8]
+                except:
+                    run_name = version.run_id[:8]
+                
                 model_info["versions"].append({
                     "version": version.version,
                     "stage": version.current_stage,
                     "run_id": version.run_id,
+                    "run_name": run_name,
                     "creation_timestamp": str(version.creation_timestamp)
                 })
             

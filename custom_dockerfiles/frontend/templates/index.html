@@ -314,24 +314,57 @@
                         <p class="info-text">Error: ${data.error}</p>
                     `;
                 } else {
+                    // Currently loaded model info
+                    const loadedModel = data.loaded_model || {};
+                    const loadedModelHtml = loadedModel.version ? `
+                        <h3 style="color: #667eea; margin-bottom: 15px;">🎯 Currently Loaded Model</h3>
+                        <div class="metadata">
+                            <div class="metadata-item">
+                                <label>Version</label>
+                                <value>${loadedModel.version}</value>
+                            </div>
+                            <div class="metadata-item">
+                                <label>Stage</label>
+                                <value><span class="status-badge status-healthy">${loadedModel.stage || 'N/A'}</span></value>
+                            </div>
+                            <div class="metadata-item">
+                                <label>Run Name/Nickname</label>
+                                <value>${loadedModel.run_name || 'N/A'}</value>
+                            </div>
+                            <div class="metadata-item">
+                                <label>Run ID (Hash)</label>
+                                <value style="font-family: monospace; font-size: 0.85em;">${loadedModel.run_id ? loadedModel.run_id.substring(0, 12) + '...' : 'N/A'}</value>
+                            </div>
+                        </div>
+                        <div class="metadata" style="margin-top: 10px;">
+                            <div class="metadata-item" style="grid-column: 1 / -1;">
+                                <label>Artifact URI (MinIO Path)</label>
+                                <value style="font-family: monospace; font-size: 0.8em; word-break: break-all;">${loadedModel.artifact_uri || 'N/A'}</value>
+                            </div>
+                        </div>
+                    ` : '<p class="info-text">Loaded model metadata not available</p>';
+                    
+                    // All versions info
                     const versionsHtml = data.versions && data.versions.length > 0
                         ? data.versions.map(v => `
                             <div class="metadata-item">
-                                <label>Version ${v.version}</label>
-                                <value>${v.stage || 'None'}</value>
+                                <label>Version ${v.version} ${v.run_name ? '(' + v.run_name + ')' : ''}</label>
+                                <value>
+                                    <span class="status-badge ${v.stage === 'Production' ? 'status-healthy' : 'status-unhealthy'}">${v.stage || 'None'}</span>
+                                    <div style="font-family: monospace; font-size: 0.75em; margin-top: 5px; color: #999;">${v.run_id.substring(0, 12)}...</div>
+                                </value>
                             </div>
                         `).join('')
                         : '<p class="info-text">No version information available</p>';
                     
                     modelInfoDiv.innerHTML = `
+                        ${loadedModelHtml}
+                        
+                        <h3 style="color: #667eea; margin: 25px 0 15px 0;">📋 All Registered Versions</h3>
                         <div class="metadata">
                             <div class="metadata-item">
                                 <label>Model Name</label>
                                 <value>${data.model_name || 'N/A'}</value>
-                            </div>
-                            <div class="metadata-item">
-                                <label>Current Stage</label>
-                                <value><span class="status-badge status-healthy">${data.model_stage || 'N/A'}</span></value>
                             </div>
                             <div class="metadata-item">
                                 <label>MLflow URI</label>
@@ -431,12 +464,30 @@
                         <value>${data.model_name || 'N/A'}</value>
                     </div>
                     <div class="metadata-item">
-                        <label>Stage</label>
-                        <value>${data.model_stage || 'N/A'}</value>
+                        <label>Version</label>
+                        <value>${data.model_version || 'N/A'}</value>
                     </div>
                     <div class="metadata-item">
-                        <label>Samples</label>
-                        <value>${data.num_samples || 1}</value>
+                        <label>Stage</label>
+                        <value><span class="status-badge status-healthy">${data.model_stage || 'N/A'}</span></value>
+                    </div>
+                </div>
+                
+                <h4 style="color: #667eea; margin: 20px 0 10px 0;">🔍 Model Provenance</h4>
+                <div class="metadata">
+                    <div class="metadata-item">
+                        <label>Run Name/Nickname</label>
+                        <value>${data.run_name || 'N/A'}</value>
+                    </div>
+                    <div class="metadata-item">
+                        <label>Run ID (Hash)</label>
+                        <value style="font-family: monospace; font-size: 0.85em;">${data.run_id ? data.run_id.substring(0, 12) + '...' : 'N/A'}</value>
+                    </div>
+                </div>
+                <div class="metadata" style="margin-top: 10px;">
+                    <div class="metadata-item" style="grid-column: 1 / -1;">
+                        <label>Artifact URI (MinIO Path)</label>
+                        <value style="font-family: monospace; font-size: 0.8em; word-break: break-all;">${data.artifact_uri || 'N/A'}</value>
                     </div>
                 </div>
             `;
