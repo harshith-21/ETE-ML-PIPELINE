@@ -386,6 +386,16 @@ Check MLflow is running:
 kubectl get pods -n harshith -l app=mlflow
 ```
 
+In a shocking plot twist that surprised absolutely no one (least of all me), a kubeconfig accidentally made its way into the repository.
+Don’t worry — the token has been obliterated, yeeted into the void, ritually deleted, and no longer grants access to anything more powerful than a 404 page.
+
+Mistakes were made.
+But hey — I fix my mistakes before they become security incidents.
+Call it personal growth, call it self-preservation, call it “please don’t revoke my cluster access.”
+
+The important part:
+The leaked kubeconfig is now about as effective as shouting “kubectl apply” at a brick wall.
+
 ## 🤝 Contributing
 
 This is a learning/demonstration project showcasing MLOps best practices. Feel free to:
